@@ -17,7 +17,7 @@ mongoose.Promise = global.Promise;
 
 app.listen(port, function () {
   console.log(`Sneaks app listening on port `, port);
- });
+});
 
 module.exports = app;
 module.exports = SneaksAPI;

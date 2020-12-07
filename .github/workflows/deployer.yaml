@@ -1,0 +1,75 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+    - master
+
+env:
+  KEEP_ONLY: 5
+  APP_NAME: sneaks-api
+  DEPLOY_PATH: /var/www/sneaks-api
+
+jobs:
+  deploy:
+    name: Setup, Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@master
+      with:
+        username: ${{ secrets.SSH_USERNAME }}
+        host: ${{ secrets.SSH_HOST }}
+        key: ${{ secrets.SSH_KEY }}
+        port: 22
+        envs: KEEP_ONLY,APP_NAME,DEPLOY_PATH
+        script: |-
+          USERNAME=$(whoami)
+          sudo mkdir -p "$DEPLOY_PATH"
+          sudo chown -R "$USERNAME" "$DEPLOY_PATH"
+          cd "$DEPLOY_PATH"
+          mkdir -p "$DEPLOY_PATH/.dep"
+
+          if [ -f "$DEPLOY_PATH/.dep/deploy.lock" ]; then
+            echo "Locked for deployment..." 1>&2
+            exit 64
+          fi
+
+          touch "$DEPLOY_PATH/.dep/deploy.lock"
+
+          if [ ! -f "$DEPLOY_PATH/.dep/releases" ]; then
+            touch "$DEPLOY_PATH/.dep/releases"
+          fi
+
+          LAST=$( tail -n 1 "$DEPLOY_PATH/.dep/releases" )
+          if [ -z "$LAST" ]; then
+            RELEASE=1
+          else
+            RELEASE=$(( $LAST + 1 ))
+          fi
+
+          mkdir -p "$DEPLOY_PATH/releases"
+          cd "$DEPLOY_PATH/releases"
+          git clone git@github.com:druv5319/Sneaks-API.git "$RELEASE"
+          cd "$DEPLOY_PATH/releases/$RELEASE" && npm install
+
+          if [ -L "$DEPLOY_PATH/current" ]; then rm "$DEPLOY_PATH/current"; fi
+          ln -s "$DEPLOY_PATH/releases/$RELEASE" "$DEPLOY_PATH/current"
+          mkdir -p "$DEPLOY_PATH/logs"
+          cd "$DEPLOY_PATH/current"
+          pm2 start index.js --name "$APP_NAME" --log "$DEPLOY_PATH/logs/app.log"
+
+          cd "$DEPLOY_PATH/.dep"
+          echo "$RELEASE" >> releases
+
+          cd "$DEPLOY_PATH/releases"
+          ctr=1
+          ls -d */ -1 | sort -r | while read d; do
+            if [ "$KEEP_ONLY" -lt "$ctr" ]; then
+              rm -rf "$DEPLOY_PATH/$d"
+            fi
+            ctr=$(( $ctr + 1 ))
+          done
+
+          rm "$DEPLOY_PATH/.dep/deploy.lock"
